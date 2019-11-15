@@ -141,10 +141,17 @@ def helpsearch():
 #
 #fetching FASTA
 def fetchFASTA(query_term):
- fetchout = (f"{spellcheck.tax}.fa", "w+")
+ fetchout = open(f"{spellcheck.tax}.fa", "w+")
  print('\nFetchng '+checkhits.hitcount+' results.....')
- esearch = subprocess.Popen(['esearch', '-db', 'protein', '-query', 			 query_term],stdout=subprocess.PIPE)
- efetch_fasta = subprocess.Popen(['efetch', '-db', 'protein', '-format', 	'fasta'],stdin=esearch.stdout, stdout=fetchout)
+ esearch = subprocess.Popen(['esearch', '-db', 'protein', '-query', query_term],stdout=subprocess.PIPE)
+ efetch = subprocess.Popen(['efetch', '-db', 'protein', '-format', 	'fasta'],stdin=esearch.stdout, stdout=fetchout)
+#Making consessus
+def cons(infile) :
+ subprocess.Popen(['clustalo', '-i', f"{in}.fa", '-o', f"{in}.clstl"]) 
+#
+#def BLAST() :
+#makeblastdb -in () -title () -dbtype prot #make db directory because this outputs 3 files
+#blastp -db () -query ()
 #RUN
 spellcheck(taxonomy, protname)
 

@@ -10,14 +10,19 @@ import subprocess
 import os
 import xml.etree.ElementTree as ET
 import re
-
-
+tax = "aves"
+query_term = "aves[ORGN] AND glucose-6-phosphatase NOT PARTIAL"
+fetchout = open(f"{tax}.fa", "w+")
+print('\nFetchng  results.....')
+esearch = subprocess.Popen(['esearch', '-db', 'protein', '-query', query_term],stdout=subprocess.PIPE)
+efetch = subprocess.Popen(['efetch', '-db', 'protein', '-format', 	'fasta'],stdin=esearch.stdout, stdout=fetchout)
 
 #
-aves = open('/localdisk/home/s1992281/Assignment2/aves.fa', 'r')
-outputs = []
+#aves = open('/localdisk/home/s1992281/Assignment2/aves.fa', 'r')
 for seq in aves.readlines() :
- if re.search('[.+]', seq) :
-  outputs.append(seq)
-print(list(outputs))
-  
+ i = re.search('[.+]', seq) :
+ pd.Series.append(seq)
+#b=aves.split('>')
+#print(b)
+#print(len(outputs))
+
