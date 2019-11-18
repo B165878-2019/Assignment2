@@ -5,7 +5,6 @@ import os
 import xml.etree.ElementTree as ET
 import re
 import pandas as pd
-import time
 import shutil
 ##### Entrez utilities
 cwd = os.getcwd()
@@ -125,10 +124,10 @@ def checkhits(taxon, protname, manquery=''):
    else:
     print('\n'+big+' not a valid entry, type "yes" to use oversised sample or "no" to exit the programme and think about what you are actually searching....')
 #check if zero hits, likely typo
- elif int(checkhits.hitcount) == 0 : 
+ elif int(checkhits.hitcount) <= 50 : 
   while True :
 #loop broken only with input yes or no, yes takes user to help, no exits
-   retry = input('\nerror, zero hits, type "yes" to go to search help or "no" to exit the programme : ')
+   retry = input('\nerror, sequence number too low, type "yes" to go to search help or "no" to exit the programme : ')
    if retry.lower() in ['yes','no','y','n']:
     if retry.lower() in ['yes', 'y']:
      return helpsearch()
@@ -172,7 +171,7 @@ def fetchFASTA(query_term):
   pathname = f"{end}/{name}"
 #continue only if name is alphanumerical
   if name.isalnum()  :   
-   with open(f"{end}/{name}.fa.raw", "w") as fetchout :
+   with open(f"{end}/{name}.fa.raw", "w+") as fetchout :
     print('\nFetchng '+checkhits.hitcount+' results, please wait.....')
 #fetch fasta files for all hits
     esearch = subprocess.Popen(['esearch', '-db', 'protein', '-query', query_term], stdout=subprocess.PIPE)
@@ -329,36 +328,59 @@ def redun(namelist, df, count, inf) :
 #
 def align() :
 #quick multiple alignment of whole dataset
+#Ask for iterations in later alignment now so that both can run without input interuption
+ while True :  
+#default iteraton of 2
+  align.itera = input('\nInput desired number of iterations for final alignment : ') or "2"
+#single digit integer accepted without problem
+  if re.search('\d', align.itera) :
+   break
+#more than one digit may not be a good idea
+  elif re.search('\d(\d)+', align.itera) :
+   while True :
+#even with 250 sequences >10 iterations may take time, and not worth the output, user confirm 
+    sure = input('\nIterations of >10 may take a while to complete, are you sure you wish to continue? : ')
+    if sure.lower() in ['yes','no','y','n'] :
+     if sure.lower() in ['yes','y'] :
+      break
+     if sure.lower() in ['no','n'] :
+      return helpsearch()
+    else :
+     print('\n"'+itera+'" not a valid entry, input must be an integer')
  print('\nClustering sequences......') 
- clustalo = subprocess.Popen(['clustalo', '-v', '-i', f"{pathname}.fa.sort", '-o', f"{pathname}.clstl", '--force'])
- clustalo.wait()
+ #clustalo = subprocess.Popen(['clustalo', '-v', '-i', f"{pathname}.fa.sort", '-o', f"{pathname}.clstl", '--force'])
+ #clustalo.wait()
 #call BLAST function with non-redundand sequence file and produced alignment file as arguments
  return BLAST(f"{pathname}.fa.sort", f"{pathname}.clstl")
 #
 def BLAST(seq, alig) :
  blastout = open(f"{pathname}.BLAST", "w")
  print('\nMaking consensus.....')
+ blastdb = f"{pathname}db"
+ if not os.path.exists(blastdb) :
+  os.mkdir(blastdb)
 #make consensus from above clustalo alignment
  cons = subprocess.Popen(['cons', '-auto', '-sequence', alig, '-outseq', f"{pathname}.cons"])
  cons.wait()
 #make blast database from non-redundant sequence file 
- makedb =subprocess.Popen(['makeblastdb', '-in', seq, '-title', name, '-dbtype', 'prot'], cwd=end)
+ makedb =subprocess.Popen(['makeblastdb', '-in', seq, '-title', name, '-dbtype', 'prot', '-out', f"{name}.db"], cwd=blastdb)
  makedb.wait()
 #Run blastp on db with consensus sequence as query
- blastp =subprocess.Popen(['blastp','-outfmt', '7', '-db', f"{name}.fa.sort", '-query', f"{pathname}.cons"], cwd=end, stdout=blastout)
+ blastp =subprocess.Popen(['blastp','-outfmt', '7', '-evalue', '50', '-db', f"{name}.db", '-query', f"{pathname}.cons"], cwd=blastdb, stdout=blastout)
  blastp.wait()
 #Read blastp output into dataframe
 #comment=# : removing comment lines, column headers copied from blastp output
 #sort dataframe by e values and get 250 most similar (smallest evalue)
- df = pd.read_table(blastout.name, sep='\t', comment='#', header=(0), names=['query acc.', 'subject acc.', '% identity', 'alignment length', 'mismatches', 'gap opens', 'q. start', 'q. end', 's. start', 's. end', 'evalue', 'bit score'].sort_values(axis=0, by='evalue'))
- evalue = df[['subject acc.', 'evalue', 'bit score']].sort_values(axis=0, by='evalue').nsmallest(250, 'evalue')
+ df = pd.read_table(blastout.name, sep='\t', comment='#', header=None, names=['query acc.', 'subject acc.', '% identity', 'alignment length', 'mismatches', 'gap opens', 'q. start', 'q. end', 's. start', 's. end', 'evalue', 'bit score']).sort_values(axis=0, by='evalue')
+ evalue = df[['subject acc.', 'evalue', 'bit score', '% identity']].sort_values(axis=0, by='evalue').head(250)
+ print(evalue)
  #bitscore = df[['subject acc.', 'bit score']].sort_values(axis=0, by='bit score', ascending=False).nlargest(250, 'bit score')
  #identity = df[['subject acc.', '% identity']].sort_values(axis=0, by='% identity', ascending=False).nlargest(250, '% identity')
 #write dataframe fo file for later 
  with open(f"{pathname}.fa.top.data", "w+") as b :
   df.to_csv(sep='\t', path_or_buf=b)
 #write corresponding accessions for 250 lowest e values to "temp" file, use pullseq with temp as reference to pull 250 most similar files from sorted sequences, output to name.fa.top, then remove temp
- with open(f"{pathname}.fa.top", "w") as top :
+ with open(f"{pathname}.fa.top", "w+") as top :
   temp = open(f"{end}/temp_acc", "w")
   temp.write('\n'.join(evalue['subject acc.'].values))
   temp.close()
@@ -369,37 +391,22 @@ def BLAST(seq, alig) :
 #
 def mult() : 
 #Running clustalo again to align 250 most similar, this time ask for iterations becuase 250 sequences is not so demanding 
- while True :  
-#default iteraton of 2
-  itera = input('\nInput desired number of iterations : ') or "2"
-#single digit integer accepted without problem
-  if re.search('\d', itera) :
-   break
-#more than one digit may not be a good idea
-  elif re.search('\d(\d)+', itera) :
-   while True :
-#even with 250 sequences >10 iterations may take time, and not worth the output, user confirm 
-    sure = input('\nIterations of >10 may take a while to complete, are you sure you wish to continue? : ')
-    if sure.lower() in ['yes','no','y','n'] :
-     if sure.lower() in ['yes','y'] :
-      break
-    if sure.lower() in ['no','n'] :
-     print('\n"'+sure+'" not a valid input, please type "yes" or "no"')
-   else :
-    print('\n"'+itera+'" not a valid entry, input must be an integer')
  print('\nClustering sequences......') 
 #Run clustalo 
- clustalo = subprocess.Popen(['clustalo', '-v', f"--iter={itera}", '-i', f"{pathname}.fa.sort", '-o', f"{pathname}.clstl", '--force'])
- clustalo.wait()
+ #clustalo = subprocess.Popen(['clustalo', '-v', f"--iter={align.itera}", '-i', f"{pathname}.fa.top", '-o', f"{pathname}.clstl.top", '--force'])
+ #clustalo.wait()
 #plotcon for conservation graph
- plotcon = subprocess.Popen(['plotcon', '-auto', '-sequences', f"{pathname}.clstl", '-graph', 'x11', '-gtitle', f"conservation of {protname} in the {taxonomy} taxon", '-gdirectory', end]) 
- return PROSITE(f"{pathname}.clstl")
+ plotcon = subprocess.Popen(['plotcon', '-auto', '-sequences', f"{pathname}.clstl.top", '-graph', 'cps', '-gtitle', f"conservation_of)_{protname}_in_the_{taxonomy}_taxon"]) 
+ plotcon = subprocess.Popen(['plotcon', '-auto', '-sequences', f"{pathname}.clstl.top", '-graph', 'cps', '-gtitle', f"conservation_of)_{protname}_in_the_{taxonomy}_taxon", '-goutfile', f"{pathname}", ]) 
+ return PROSITE(f"{pathname}.clstl.top")
 #
 def PROSITE(seq) :
 #search alignment for any motifs
  patmatmotifs = subprocess.Popen(['patmatmotifs', '-auto', '-full', '-sequence', seq, '-outfile', f"{pathname}.PROSITE"])
- return
+ #iqtree = subprocess.Popen(['/localdisk/software/iqtree-1.6.6-Linux/bin/iqtree'])
+ return 
+
 #RUN
 spellcheck(taxonomy, protname)
-
+sys.exit()
 
